@@ -1,0 +1,244 @@
+From 834459c045423b075bc8c41b0263760d1d9e9b48 Mon Sep 17 00:00:00 2001
+From: "Yue, Liang" <liang.yue@cienet.com.cn>
+Date: Tue, 27 Mar 2018 13:07:59 +0800
+Subject: [PATCH] rs485 for PD06 PD07
+
+---
+ linux-3.10/drivers/char/mygpio/a64_gpio.c  | 64 +++++++++++++++++++++++++++---
+ linux-3.10/drivers/tty/serial/sunxi-uart.c | 64 ++++++++++++++++++++++++++++++
+ linux-3.10/drivers/tty/serial/sunxi-uart.h | 35 ++++++++++++++++
+ 3 files changed, 158 insertions(+), 5 deletions(-)
+
+diff --git a/linux-3.10/drivers/char/mygpio/a64_gpio.c b/linux-3.10/drivers/char/mygpio/a64_gpio.c
+index b26f7fe..1b9dddf 100755
+--- a/linux-3.10/drivers/char/mygpio/a64_gpio.c
++++ b/linux-3.10/drivers/char/mygpio/a64_gpio.c
+@@ -168,7 +168,7 @@ static int g_threadrun = 0;
+ //}
+ //==============================================================================
+ // LED灯, 防拆报警与门铃
+-static void gpio_control(unsigned int pin, unsigned int sw)
++void gpio_control(unsigned int pin, unsigned int sw)
+ {
+ 	// output
+ //	if(0 != gpio_request(pin, NULL)) {
+@@ -186,6 +186,58 @@ static void gpio_control(unsigned int pin, unsigned int sw)
+ 		__gpio_set_value(pin, 0);
+ }
+ 
++void gpio_rs485_s1(int sw)
++{
++	if (a64io_info.io_rs485s1.gpio <= 0) {
++		if (0 != gpio_request(a64io_info.io_rs485s1.gpio, NULL)) {
++			a64gpio_msg("rs485s2 gpio_request is failed\n");
++		} else {
++			if (sw > 0) {
++				sw = 1;
++			} else {
++				sw = 0;
++			}
++			if (0 != gpio_direction_output(a64io_info.io_rs485s1.gpio, sw)) {
++				a64gpio_msg("rs485s2 gpio set err!\n");
++			}
++			printk("%s, %d\n",__func__, a64io_info.io_rs485s1.gpio);
++		}
++		return;
++	}
++
++	if (sw) {
++		__gpio_set_value(a64io_info.io_rs485s1.gpio, 1);
++	} else {
++		__gpio_set_value(a64io_info.io_rs485s1.gpio, 0);
++	}
++}
++
++void gpio_rs485_s2(int sw)
++{
++	if (a64io_info.io_rs485s1.gpio <= 0) {
++		if (0 != gpio_request(a64io_info.io_rs485s2.gpio, NULL)) {
++			a64gpio_msg("rs485s2 gpio_request is failed\n");
++		} else {
++			if (sw > 0) {
++				sw = 1;
++			} else {
++				sw = 0;
++			}
++			if (0 != gpio_direction_output(a64io_info.io_rs485s2.gpio, sw)) {
++				a64gpio_msg("rs485s2 gpio set err!\n");
++			}
++			printk("%s, %d\n",__func__, a64io_info.io_rs485s2.gpio);
++		}
++		return;
++	}
++
++	if (sw) {
++		__gpio_set_value(a64io_info.io_rs485s2.gpio, 1);
++	} else {
++		__gpio_set_value(a64io_info.io_rs485s2.gpio, 0);
++	}
++}
++
+ // GPIO控制 受应用层控制
+ static void IoCtl_GpioControl(TioLevelCtrl gctrl)
+ {
+@@ -593,19 +645,21 @@ static void a64gpio_init(a64gpio_priv_t *priv)
+ 		}
+ 		if(0 != gpio_request(a64io_info.io_rs485s1.gpio, NULL)) {
+ 			a64gpio_msg("rs485s1 gpio_request is failed\n");
+-		}		
+-		else {			 
++		}
++		else {
+ 			if (0 != gpio_direction_output(a64io_info.io_rs485s1.gpio, 1)) {
+ 				a64gpio_msg("rs485s1 gpio set err!");
+ 			}
++			printk("%s %d",__func__, a64io_info.io_rs485s1.gpio);
+ 		}
+ 		if(0 != gpio_request(a64io_info.io_rs485s2.gpio, NULL)) {
+ 			a64gpio_msg("rs485s2 gpio_request is failed\n");
+-		}		
++		}
+ 		else {
+ 			if (0 != gpio_direction_output(a64io_info.io_rs485s2.gpio, 1)) {
+ 				a64gpio_msg("rs485s2 gpio set err!");
+ 			}
++			printk("%s, %d",__func__, a64io_info.io_rs485s2.gpio);
+ 		}
+ 		if(0 != gpio_request(a64io_info.io_watchdog.gpio, NULL)) {
+ 			a64gpio_msg("watchdog gpio_request is failed\n");
+@@ -617,7 +671,7 @@ static void a64gpio_init(a64gpio_priv_t *priv)
+ 		}
+ 		if(0 != gpio_request(a64io_info.io_mcumsck.gpio, NULL)) {
+ 			a64gpio_msg("mcumsck gpio_request is failed\n");
+-		}		
++		}
+ 		else {
+ 			if (0 != gpio_direction_output(a64io_info.io_mcumsck.gpio, 1)) {
+ 				a64gpio_msg("mcumsck gpio set err!");
+diff --git a/linux-3.10/drivers/tty/serial/sunxi-uart.c b/linux-3.10/drivers/tty/serial/sunxi-uart.c
+index 65e8468..ef144ec 100755
+--- a/linux-3.10/drivers/tty/serial/sunxi-uart.c
++++ b/linux-3.10/drivers/tty/serial/sunxi-uart.c
+@@ -112,6 +112,8 @@ static void sw_uart_dump_data(struct sw_uart_port *sw_uport, char* prompt)
+ 
+ #define UART_TO_SPORT(port)	((struct sw_uart_port*)port)
+ 
++static inline void wait_for_xmitr(struct sw_uart_port *sw_uport);
++
+ static inline unsigned char serial_in(struct uart_port *port, int offs)
+ {
+ 	return readb(port->membase + offs);
+
+@@ -213,6 +215,24 @@ static void sw_uart_stop_tx(struct uart_port *port)
+ 		SERIAL_DBG("stop tx, ier %x\n", sw_uport->ier);
+ 		serial_out(port, sw_uport->ier, SUNXI_UART_IER);
+ 	}
++
++	wait_for_xmitr(sw_uport);
++
++	if (sw_uport->id == 3) {
++		if (a64io_info.io_rs485s1.gpio != 0) {
++			gpio_rs485_s1(0);
++		} else {
++			printk("%s, %d, %s\n", __func__, sw_uport->id, "error rs485s1 == 0");
++		}
++	}
++
++	if (sw_uport->id == 4) {
++		if (a64io_info.io_rs485s2.gpio != 0) {
++			gpio_rs485_s2(0);
++		} else {
++			printk("%s, %d, %s\n", __func__, sw_uport->id, "error rs485s2 == 0");
++		}
++	}
+ }
+ 
+ static void sw_uart_start_tx(struct uart_port *port)
+
+@@ -246,6 +266,23 @@ static void sw_uart_handle_tx(struct sw_uart_port *sw_uport)
+ 		return;
+ 	}
+ 	count = sw_uport->port.fifosize / 2;
++
++	if (sw_uport->id==3) {
++		if (a64io_info.io_rs485s1.gpio != 0) {
++			gpio_rs485_s1(1);
++		} else {
++			printk("%s, %d, %s\n", __func__,sw_uport->id,"error rs485s1 == 0");
++		}
++	}
++
++	if (sw_uport->id==4) {
++		if (a64io_info.io_rs485s2.gpio != 0) {
++			gpio_rs485_s2(1);
++		} else {
++			printk("%s, %d,%s\n", __func__,sw_uport->id,"error rs485s2 == 0");
++		}
++	}
++
+ 	do {
+ #ifdef CONFIG_SW_UART_DUMP_DATA
+ 		sw_uport->dump_buff[sw_uport->dump_len++] = xmit->buf[xmit->tail];
+@@ -651,6 +688,19 @@ static int sw_uart_startup(struct uart_port *port)
+ 
+ 	sw_uart_config_rs485(port, &sw_uport->rs485conf);
+ 
++    if (sw_uport->id == 3) {
++		if (a64io_info.io_rs485s1.gpio != 0) {
++			gpio_rs485_s1(0);
++		} else {
++			printk("%s, %s\n",__func__, "error rs485s1 == 0");
++		}
++    } else if (sw_uport->id == 4) {
++        if (a64io_info.io_rs485s2.gpio != 0) {
++            gpio_rs485_s2(0);
++        } else {
++			printk("%s, %s\n",__func__, "error rs485s2 == 0");
++		}
++    }
+ 	return 0;
+ }
+
+@@ -1430,6 +1480,20 @@ static int sw_uart_probe(struct platform_device *pdev)
+ 
+ 	SERIAL_DBG("add uart%d port, port_type %d, uartclk %d\n",
+ 			pdev->id, port->type, port->uartclk);
++
++    if ( pdev->id == 3) {
++        //while (1) 
++        {
++            if (a64io_info.io_rs485s1.gpio != 0) {
++                gpio_control(a64io_info.io_rs485s1.gpio, 0);
++            }
++        }
++    } else if ( pdev->id == 4) {
++        if (a64io_info.io_rs485s2.gpio != 0) {
++            gpio_control(a64io_info.io_rs485s2.gpio, 0);
++        }
++    }
++
+ 	return uart_add_one_port(&sw_uart_driver, port);
+ }
+ 
+diff --git a/linux-3.10/drivers/tty/serial/sunxi-uart.h b/linux-3.10/drivers/tty/serial/sunxi-uart.h
+index 19d6595..994dfda 100755
+--- a/linux-3.10/drivers/tty/serial/sunxi-uart.h
++++ b/linux-3.10/drivers/tty/serial/sunxi-uart.h
+@@ -19,6 +19,7 @@
+ #define _SUNXI_UART_H_
+ 
+ #include <linux/regulator/consumer.h>
++#include <linux/sys_config.h>
+ 
+ struct sw_uart_pdata {
+ 	unsigned int used;
+@@ -192,3 +193,37 @@ struct platform_device *sw_uart_get_pdev(int uart_id);
+ 
+ #endif /* end of _SUNXI_UART_H_ */
+
++extern void gpio_control(unsigned int pin, unsigned int sw);
++extern void gpio_rs485_s1(int sw);
++extern void gpio_rs485_s2(int sw);
+-- 
+1.9.1
+
